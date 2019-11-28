@@ -1,5 +1,5 @@
 venv/*
 .idea/*
 *keycloak.json*
-flask_keycloak.egg-info/*
+dash_keycloak.egg-info/*
 dist/
