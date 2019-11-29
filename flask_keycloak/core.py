@@ -87,7 +87,7 @@ class FlaskKeycloak:
                                realm_name=config_data["realm"],
                                client_id=config_data["resource"],
                                client_secret_key=config_data["credentials"]["secret"],
-                               verify=config_data["ssl-required"] is not "none")
+                               verify=config_data["ssl-required"] != "none")
         if keycloak_kwargs is not None:
             keycloak_config = {**keycloak_config, **keycloak_kwargs}
         keycloak_openid = KeycloakOpenID(**keycloak_config)
