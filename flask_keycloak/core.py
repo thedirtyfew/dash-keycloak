@@ -53,9 +53,11 @@ class AuthMiddleWare:
                                            code=request.args.get("code", "unknown"),
                                            redirect_uri=self.callback_uri)
         user = self.keycloak_openid.userinfo(token['access_token'])
-        # Bind token and user info to the session.
+        introspect = self.keycloak_openid.introspect(token['access_token'])
+        # Bind token, userinfo, and token introspection to the session.
         session["token"] = token
-        session["user"] = user
+        session["userinfo"] = user
+        session["introspect"] = introspect
         # Redirect to the desired uri, i.e. the post login page.
         return redirect(self.redirect_uri)
 
@@ -77,7 +79,7 @@ class FlaskKeycloak:
                 return redirect(redirect_uri)
 
     @staticmethod
-    def from_kc_oidc_json(app, redirect_uri, config_path=None, logout_path=None, keycloak_kwargs=None):
+    def from_kc_oidc_json(app, redirect_uri, config_path=None, logout_path=None, keycloak_kwargs=None, authorization_settings=None):
         # Read config, assumed to be in Keycloak OIDC JSON format.
         config_path = "keycloak.json" if config_path is None else config_path
         with open(config_path, 'r') as f:
@@ -91,4 +93,6 @@ class FlaskKeycloak:
         if keycloak_kwargs is not None:
             keycloak_config = {**keycloak_config, **keycloak_kwargs}
         keycloak_openid = KeycloakOpenID(**keycloak_config)
+        if authorization_settings is not None:
+            keycloak_openid.load_authorization_config(authorization_settings)
         return FlaskKeycloak(app, keycloak_openid, redirect_uri, logout_path=logout_path)
