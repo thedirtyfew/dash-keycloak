@@ -27,3 +27,11 @@ The relevant packages can be installed as
 After completing the above step, the example can be run with the command
 
     python3 -m flask_keycloak.examples.dash_example /path/to/keycloak.json 
+
+#### Deployment
+
+Bump the version number in setup.py and run
+
+    python setup.py sdist
+    pip install twine
+    twine upload dist/*
