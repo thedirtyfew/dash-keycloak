@@ -32,6 +32,6 @@ After completing the above step, the example can be run with the command
 
 Bump the version number in setup.py and run
 
-    python setup.py sdist
-    pip install twine
+    python3 setup.py sdist
+    pip3 install twine
     twine upload dist/*
