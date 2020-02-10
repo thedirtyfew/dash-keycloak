@@ -1,7 +1,7 @@
 import json
 import urllib.parse
 
-from flask import redirect, session
+from flask import redirect, session, request
 from keycloak import KeycloakOpenID
 from werkzeug.wrappers import Request
 
@@ -57,22 +57,30 @@ class AuthMiddleWare:
         token = self.keycloak_openid.token(grant_type=["authorization_code"],
                                            code=request.args.get("code", "unknown"),
                                            redirect_uri=self.callback_uri)
-        user = self.keycloak_openid.userinfo(token['access_token'])
-        introspect = self.keycloak_openid.introspect(token['access_token'])
+        self.bind_to_session(self.keycloak_openid, token)
+        # Redirect to the desired uri, i.e. the post login page.
+        return redirect(self.redirect_uri)
+
+    @staticmethod
+    def bind_to_session(keycloak_openid, token):
+        user = keycloak_openid.userinfo(token['access_token'])
+        introspect = keycloak_openid.introspect(token['access_token'])
         # Bind token, userinfo, and token introspection to the session.
         session["token"] = token
         session["userinfo"] = user
         session["introspect"] = introspect
-        # Redirect to the desired uri, i.e. the post login page.
-        return redirect(self.redirect_uri)
 
 
 class FlaskKeycloak:
 
-    def __init__(self, app, keycloak_openid, redirect_uri, uri_whitelist=None, logout_path=None, heartbeat_path=None):
+    def __init__(self, app, keycloak_openid, redirect_uri, uri_whitelist=None, logout_path=None, heartbeat_path=None,
+                 login_path=None):
         logout_path = '/logout' if logout_path is None else logout_path
+        uri_whitelist = [] if uri_whitelist is None else uri_whitelist
         if heartbeat_path is not None:
-            uri_whitelist = uri_whitelist + [heartbeat_path] if uri_whitelist is not None else [heartbeat_path]
+            uri_whitelist = uri_whitelist + [heartbeat_path]
+        if login_path is not None:
+            uri_whitelist = uri_whitelist + [login_path]
         # Bind secret key.
         if keycloak_openid._client_secret_key is not None:
             app.config['SECRET_KEY'] = keycloak_openid._client_secret_key
@@ -86,15 +94,21 @@ class FlaskKeycloak:
                 keycloak_openid.logout(session["token"]["refresh_token"])
                 session.clear()
                 return redirect(redirect_uri)
+        if login_path:
+            @app.route(login_path, methods=['POST'])
+            def route_login():
+                token = keycloak_openid.token(**request.json)
+                AuthMiddleWare.bind_to_session(keycloak_openid, token)
+                # Redirect to the desired uri, i.e. the post login page.
+                return redirect(redirect_uri)
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
             def route_heartbeat_path():
                 return "Chuck Norris can kill two stones with one bird."
 
-
     @staticmethod
     def from_kc_oidc_json(app, redirect_uri, config_path=None, logout_path=None, heartbeat_path=None,
-                          keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None):
+                          keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None):
         # Read config, assumed to be in Keycloak OIDC JSON format.
         config_path = "keycloak.json" if config_path is None else config_path
         with open(config_path, 'r') as f:
@@ -111,4 +125,4 @@ class FlaskKeycloak:
         if authorization_settings is not None:
             keycloak_openid.load_authorization_config(authorization_settings)
         return FlaskKeycloak(app, keycloak_openid, redirect_uri, logout_path=logout_path,
-                             heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist)
+                             heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path)
