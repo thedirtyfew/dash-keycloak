@@ -1,4 +1,4 @@
-This purpose of this library is provide seamless integration of Plotly Dash with keycloak via the python-keycloak package.
+This purpose of this library is to provide seamless integration of Plotly Dash with keycloak via the python-keycloak package.
 
 #### Prerequisites
 
