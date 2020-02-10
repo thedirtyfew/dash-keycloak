@@ -94,6 +94,7 @@ class FlaskKeycloak:
                 keycloak_openid.logout(session["token"]["refresh_token"])
                 session.clear()
                 return redirect(redirect_uri)
+        # Add login path if needed (used for non-gui login).
         if login_path:
             @app.route(login_path, methods=['POST'])
             def route_login():
@@ -101,6 +102,7 @@ class FlaskKeycloak:
                 AuthMiddleWare.bind_to_session(keycloak_openid, token)
                 # Redirect to the desired uri, i.e. the post login page.
                 return redirect(redirect_uri)
+        # Add heartbeat path if needed.
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
             def route_heartbeat_path():
