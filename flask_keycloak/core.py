@@ -1,6 +1,5 @@
 import json
 import urllib.parse
-
 from flask import redirect, session, request
 from keycloak import KeycloakOpenID
 from werkzeug.wrappers import Request
@@ -11,68 +10,77 @@ class Objectify(object):
         self.__dict__.update({key.lower(): kwargs[key] for key in kwargs})
 
 
-class AuthMiddleWare:
-    def __init__(self, app, config, session_interface, keycloak_openid, redirect_uri, uri_whitelist=None):
+class AuthHandler:
+    def __init__(self, app, config, session_interface, keycloak_openid):
         self.app = app
         self.config = config
         self.session_interface = session_interface
         self.keycloak_openid = keycloak_openid
-        self.redirect_uri = redirect_uri
-        self.uri_whitelist = uri_whitelist
         # Create object representation of config.
         self.config_object = Objectify(config=config, **config)
-        # Setup uris.
-        parse_result = urllib.parse.urlparse(redirect_uri)
-        self.callback_path = "/keycloak/callback"
-        self.callback_uri = parse_result._replace(path=self.callback_path).geturl()
-        self.auth_uri = self.keycloak_openid.auth_url(self.callback_uri)
 
-    def __call__(self, environ, start_response):
-        response = None
-        request = Request(environ)
+    def is_logged_in(self, request):
+        return "token" in self.session_interface.open_session(self.config_object, request)
+
+    def auth_url(self, callback_uri):
+        return self.keycloak_openid.auth_url(callback_uri)
+
+    def login(self, request, response, **kwargs):
         session = self.session_interface.open_session(self.config_object, request)
-
-        # If the uri has been whitelisted, just proceed.
-        if self.uri_whitelist is not None and request.path in self.uri_whitelist:
-            return self.app(environ, start_response)
-
-        # On callback, request access token.
-        if request.path == self.callback_path:
-            response = self.set_access_token(session, request)
-
-        # If unauthorized, redirect to login page.
-        if self.callback_path not in request.path and "token" not in session:
-            response = redirect(self.auth_uri)
-
-        # Save the session.
-        if response:
-            self.session_interface.save_session(self.config_object, session, response)
-            return response(environ, start_response)
-
-        # Request is authorized, just proceed.
-        return self.app(environ, start_response)
-
-    def set_access_token(self, session, request):
         # Get access token from Keycloak.
-        token = self.keycloak_openid.token(grant_type=["authorization_code"],
-                                           code=request.args.get("code", "unknown"),
-                                           redirect_uri=self.callback_uri)
-        self.bind_to_session(self.keycloak_openid, token)
-        # Redirect to the desired uri, i.e. the post login page.
-        return redirect(self.redirect_uri)
-
-    @staticmethod
-    def bind_to_session(keycloak_openid, token):
-        user = keycloak_openid.userinfo(token['access_token'])
-        introspect = keycloak_openid.introspect(token['access_token'])
+        token = self.keycloak_openid.token(**kwargs)
+        # Get extra info.
+        user = self.keycloak_openid.userinfo(token['access_token'])
+        introspect = self.keycloak_openid.introspect(token['access_token'])
         # Bind token, userinfo, and token introspection to the session.
         session["token"] = token
         session["userinfo"] = user
         session["introspect"] = introspect
+        # Save the session.
+        self.session_interface.save_session(self.config_object, session, response)
+        return response
+
+    def logout(self, response=None):
+        self.keycloak_openid.logout(session["token"]["refresh_token"])
+        session.clear()
+        return response
+
+
+class AuthMiddleWare:
+    def __init__(self, app, auth_handler, redirect_uri, uri_whitelist=None):
+        self.app = app
+        self.auth_handler = auth_handler
+        self.redirect_uri = redirect_uri
+        self.uri_whitelist = uri_whitelist
+        # Setup uris.
+        parse_result = urllib.parse.urlparse(redirect_uri)
+        self.callback_path = "/keycloak/callback"
+        self.callback_uri = parse_result._replace(path=self.callback_path).geturl()
+        self.auth_uri = self.auth_handler.auth_url(self.callback_uri)
+
+    def __call__(self, environ, start_response):
+        response = None
+        request = Request(environ)
+        # If the uri has been whitelisted, just proceed.
+        if self.uri_whitelist is not None and request.path in self.uri_whitelist:
+            return self.app(environ, start_response)
+        # On callback, request access token.
+        if request.path == self.callback_path:
+            kwargs = dict(grant_type=["authorization_code"],
+                          code=request.args.get("code", "unknown"),
+                          redirect_uri=self.callback_uri)
+            response = self.auth_handler.login(request, redirect(self.redirect_uri), **kwargs)
+        # If unauthorized, redirect to login page.
+        if self.callback_path not in request.path and not self.auth_handler.is_logged_in(request):
+            response = redirect(self.auth_uri)
+        # Save the session.
+        if response:
+            return response(environ, start_response)
+        # Request is authorized, just proceed.
+        return self.app(environ, start_response)
 
 
 class FlaskKeycloak:
-
     def __init__(self, app, keycloak_openid, redirect_uri, uri_whitelist=None, logout_path=None, heartbeat_path=None,
                  login_path=None):
         logout_path = '/logout' if logout_path is None else logout_path
@@ -85,24 +93,17 @@ class FlaskKeycloak:
         if keycloak_openid._client_secret_key is not None:
             app.config['SECRET_KEY'] = keycloak_openid._client_secret_key
         # Add middleware.
-        app.wsgi_app = AuthMiddleWare(app.wsgi_app, app.config, app.session_interface, keycloak_openid, redirect_uri,
-                                      uri_whitelist)
+        auth_handler = AuthHandler(app.wsgi_app, app.config, app.session_interface, keycloak_openid)
+        app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist)
         # Add logout mechanism.
         if logout_path:
             @app.route(logout_path, methods=['POST'])
             def route_logout():
-                keycloak_openid.logout(session["token"]["refresh_token"])
-                session.clear()
-                return redirect(redirect_uri)
-        # Add login path if needed (used for non-gui login).
+                return auth_handler.logout(redirect(redirect_uri))
         if login_path:
             @app.route(login_path, methods=['POST'])
             def route_login():
-                token = keycloak_openid.token(**request.json)
-                AuthMiddleWare.bind_to_session(keycloak_openid, token)
-                # Redirect to the desired uri, i.e. the post login page.
-                return redirect(redirect_uri)
-        # Add heartbeat path if needed.
+                return auth_handler.login(request, redirect(redirect_uri), **request.json)
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
             def route_heartbeat_path():
