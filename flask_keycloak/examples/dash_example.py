@@ -22,7 +22,7 @@ app.layout = html.Div(id="main", children=[html.Div(id="greeting"), dcc.LogoutBu
     Output('greeting', 'children'),
     [Input('main', 'children')])
 def update_greeting(input_value):
-    user = session["user"]
+    user = session["userinfo"]
     return "Hello {}".format(user['preferred_username'])
 
 
