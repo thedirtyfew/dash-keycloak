@@ -133,22 +133,20 @@ class FlaskKeycloak:
                              heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path)
 
     @staticmethod
-    def try_from_kc_oidc_json(logger=None, **kwargs):
+    def try_from_kc_oidc_json(app, redirect_uri, **kwargs):
         success = True
-        if logger is None:
-            logger = logging.getLogger(__name__)
         try:
-            FlaskKeycloak.from_kc_oidc_json(**kwargs)
+            FlaskKeycloak.from_kc_oidc_json(app, redirect_uri, **kwargs)
         except FileNotFoundError:
-            logger.exception("No keycloak configuration found, proceeding without authentication.")
+            app.logger.exception("No keycloak configuration found, proceeding without authentication.")
             success = False
         except IsADirectoryError:
-            logger.exception("Keycloak configuration was directory, proceeding without authentication.")
+            app.logger.exception("Keycloak configuration was directory, proceeding without authentication.")
             success = False
         except KeycloakConnectionError:
-            logger.exception("Unable to connect to keycloak, proceeding without authentication.")
+            app.logger.exception("Unable to connect to keycloak, proceeding without authentication.")
             success = False
         except KeycloakGetError:
-            logger.exception("Encountered keycloak get error, proceeding without authentication.")
+            app.logger.exception("Encountered keycloak get error, proceeding without authentication.")
             success = False
         return success
