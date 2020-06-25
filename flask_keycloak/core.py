@@ -49,7 +49,7 @@ class AuthHandler:
 
 
 class AuthMiddleWare:
-    def __init__(self, app, auth_handler, redirect_uri, uri_whitelist=None):
+    def __init__(self, app, auth_handler, redirect_uri, uri_whitelist=None, prefix_callback_path=None):
         self.app = app
         self.auth_handler = auth_handler
         self.redirect_uri = redirect_uri
@@ -57,7 +57,12 @@ class AuthMiddleWare:
         # Setup uris.
         parse_result = urllib.parse.urlparse(redirect_uri)
         self.callback_path = "/keycloak/callback"
-        self.callback_uri = parse_result._replace(path=self.callback_path).geturl()
+        # Optionally, prefix callback path with current path.
+        callback_path = self.callback_path
+        if prefix_callback_path:
+            callback_path = parse_result.path + callback_path
+        # Bind the uris.
+        self.callback_uri = parse_result._replace(path=callback_path).geturl()
         self.auth_uri = self.auth_handler.auth_url(self.callback_uri)
 
     def __call__(self, environ, start_response):
@@ -84,7 +89,7 @@ class AuthMiddleWare:
 
 class FlaskKeycloak:
     def __init__(self, app, keycloak_openid, redirect_uri, uri_whitelist=None, logout_path=None, heartbeat_path=None,
-                 login_path=None):
+                 login_path=None, prefix_callback_path=None):
         logout_path = '/logout' if logout_path is None else logout_path
         uri_whitelist = [] if uri_whitelist is None else uri_whitelist
         if heartbeat_path is not None:
@@ -96,7 +101,7 @@ class FlaskKeycloak:
             app.config['SECRET_KEY'] = keycloak_openid._client_secret_key
         # Add middleware.
         auth_handler = AuthHandler(app.wsgi_app, app.config, app.session_interface, keycloak_openid)
-        app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist)
+        app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist, prefix_callback_path)
         # Add logout mechanism.
         if logout_path:
             @app.route(logout_path, methods=['POST'])
@@ -113,7 +118,8 @@ class FlaskKeycloak:
 
     @staticmethod
     def from_kc_oidc_json(app, redirect_uri, config_path=None, logout_path=None, heartbeat_path=None,
-                          keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None):
+                          keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
+                          prefix_callback_path=None):
         # Read config, assumed to be in Keycloak OIDC JSON format.
         config_path = "keycloak.json" if config_path is None else config_path
         with open(config_path, 'r') as f:
@@ -130,7 +136,8 @@ class FlaskKeycloak:
         if authorization_settings is not None:
             keycloak_openid.load_authorization_config(authorization_settings)
         return FlaskKeycloak(app, keycloak_openid, redirect_uri, logout_path=logout_path,
-                             heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path)
+                             heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path,
+                             prefix_callback_path=prefix_callback_path)
 
     @staticmethod
     def try_from_kc_oidc_json(app, redirect_uri, **kwargs):
