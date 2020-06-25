@@ -14,7 +14,7 @@ setup(
     description="Flask extension providing Keycloak integration via the python-keycloak package",
     long_description=README,
     long_description_content_type="text/markdown",
-    url="https://github.com/",
+    url="https://github.com/thedirtyfew/dash-keycloak",
     author="Emil Haldrup Eriksen",
     author_email="emil.h.eriksen@gmail.com",
     license="MIT",
