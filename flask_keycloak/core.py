@@ -1,6 +1,7 @@
 import json
 import logging
 import urllib.parse
+import re
 from flask import redirect, session, request
 from keycloak import KeycloakOpenID, KeycloakGetError
 from keycloak.exceptions import KeycloakConnectionError
@@ -10,6 +11,15 @@ from werkzeug.wrappers import Request
 class Objectify(object):
     def __init__(self, **kwargs):
         self.__dict__.update({key.lower(): kwargs[key] for key in kwargs})
+
+        
+def check_match_in_list(patterns, to_check):
+    if patterns is None or to_check is None:
+        return False
+    for pattern in patterns:
+        if re.search(pattern, to_check):
+            return True
+    return False
 
 
 class AuthHandler:
@@ -69,7 +79,7 @@ class AuthMiddleWare:
         response = None
         request = Request(environ)
         # If the uri has been whitelisted, just proceed.
-        if self.uri_whitelist is not None and request.path in self.uri_whitelist:
+        if check_match_in_list(self.uri_whitelist, request.path):
             return self.app(environ, start_response)
         # On callback, request access token.
         if request.path == self.callback_path:
