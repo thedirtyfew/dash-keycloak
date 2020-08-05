@@ -4,7 +4,7 @@ import urllib.parse
 import re
 from flask import redirect, session, request
 from keycloak import KeycloakOpenID, KeycloakGetError
-from keycloak.exceptions import KeycloakConnectionError
+from keycloak.exceptions import KeycloakConnectionError, KeycloakAuthenticationError
 from werkzeug.wrappers import Request
 
 
@@ -40,16 +40,20 @@ class AuthHandler:
     def login(self, request, response, **kwargs):
         session = self.session_interface.open_session(self.config_object, request)
         # Get access token from Keycloak.
-        token = self.keycloak_openid.token(**kwargs)
-        # Get extra info.
-        user = self.keycloak_openid.userinfo(token['access_token'])
-        introspect = self.keycloak_openid.introspect(token['access_token'])
-        # Bind token, userinfo, and token introspection to the session.
-        session["token"] = token
-        session["userinfo"] = user
-        session["introspect"] = introspect
-        # Save the session.
-        self.session_interface.save_session(self.config_object, session, response)
+        try:
+            token = self.keycloak_openid.token(**kwargs)
+            # Get extra info.
+            user = self.keycloak_openid.userinfo(token['access_token'])
+            introspect = self.keycloak_openid.introspect(token['access_token'])
+            # Bind token, userinfo, and token introspection to the session.
+            session["token"] = token
+            session["userinfo"] = user
+            session["introspect"] = introspect
+            # Save the session.
+            self.session_interface.save_session(self.config_object, session, response)
+        except KeycloakAuthenticationError as e:
+            return e.error_message, e.response_code
+
         return response
 
     def logout(self, response=None):
@@ -120,6 +124,8 @@ class FlaskKeycloak:
         if login_path:
             @app.route(login_path, methods=['POST'])
             def route_login():
+                if request.json is None or ("username" not in request.json or "password" not in request.json):
+                    return "No username and/or password was specified as json", 400
                 return auth_handler.login(request, redirect(redirect_uri), **request.json)
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
