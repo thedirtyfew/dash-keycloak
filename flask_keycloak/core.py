@@ -2,7 +2,7 @@ import json
 import logging
 import urllib.parse
 import re
-from flask import redirect, session, request, abort, Response
+from flask import redirect, session, request, Response
 from keycloak import KeycloakOpenID, KeycloakGetError
 from keycloak.exceptions import KeycloakConnectionError, KeycloakAuthenticationError
 from werkzeug.wrappers import Request
