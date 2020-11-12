@@ -2,7 +2,7 @@ import json
 import logging
 import urllib.parse
 import re
-from flask import redirect, session, request
+from flask import redirect, session, request, abort, Response
 from keycloak import KeycloakOpenID, KeycloakGetError
 from keycloak.exceptions import KeycloakConnectionError, KeycloakAuthenticationError
 from werkzeug.wrappers import Request
@@ -63,7 +63,7 @@ class AuthHandler:
 
 
 class AuthMiddleWare:
-    def __init__(self, app, auth_handler, redirect_uri, uri_whitelist=None, prefix_callback_path=None):
+    def __init__(self, app, auth_handler, redirect_uri, uri_whitelist=None, prefix_callback_path=None, redirect_on_unauthorized=True):
         self.app = app
         self.auth_handler = auth_handler
         self.redirect_uri = redirect_uri
@@ -78,6 +78,7 @@ class AuthMiddleWare:
         # Bind the uris.
         self.callback_uri = parse_result._replace(path=callback_path).geturl()
         self.auth_uri = self.auth_handler.auth_url(self.callback_uri)
+        self.redirect_on_unauthorized = redirect_on_unauthorized
 
     def __call__(self, environ, start_response):
         response = None
@@ -93,7 +94,10 @@ class AuthMiddleWare:
             response = self.auth_handler.login(request, redirect(self.redirect_uri), **kwargs)
         # If unauthorized, redirect to login page.
         if self.callback_path not in request.path and not self.auth_handler.is_logged_in(request):
-            response = redirect(self.auth_uri)
+            if self.redirect_on_unauthorized:
+                response = redirect(self.auth_uri)
+            else:
+                response = Response("Unauthorized", 401)
         # Save the session.
         if response:
             return response(environ, start_response)
@@ -103,7 +107,7 @@ class AuthMiddleWare:
 
 class FlaskKeycloak:
     def __init__(self, app, keycloak_openid, redirect_uri, uri_whitelist=None, logout_path=None, heartbeat_path=None,
-                 login_path=None, prefix_callback_path=None):
+                 login_path=None, prefix_callback_path=None, redirect_on_unauthorized=True):
         logout_path = '/logout' if logout_path is None else logout_path
         uri_whitelist = [] if uri_whitelist is None else uri_whitelist
         if heartbeat_path is not None:
@@ -115,7 +119,8 @@ class FlaskKeycloak:
             app.config['SECRET_KEY'] = keycloak_openid._client_secret_key
         # Add middleware.
         auth_handler = AuthHandler(app.wsgi_app, app.config, app.session_interface, keycloak_openid)
-        app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist, prefix_callback_path)
+        app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist,
+                                      prefix_callback_path, redirect_on_unauthorized)
         # Add logout mechanism.
         if logout_path:
             @app.route(logout_path, methods=['POST'])
@@ -135,7 +140,7 @@ class FlaskKeycloak:
     @staticmethod
     def from_kc_oidc_json(app, redirect_uri, config_path=None, logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
-                          prefix_callback_path=None):
+                          prefix_callback_path=None, redirect_on_unauthorized=True):
         # Read config, assumed to be in Keycloak OIDC JSON format.
         config_path = "keycloak.json" if config_path is None else config_path
         with open(config_path, 'r') as f:
@@ -153,7 +158,7 @@ class FlaskKeycloak:
             keycloak_openid.load_authorization_config(authorization_settings)
         return FlaskKeycloak(app, keycloak_openid, redirect_uri, logout_path=logout_path,
                              heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path,
-                             prefix_callback_path=prefix_callback_path)
+                             prefix_callback_path=prefix_callback_path, redirect_on_unauthorized=redirect_on_unauthorized)
 
     @staticmethod
     def try_from_kc_oidc_json(app, redirect_uri, **kwargs):
