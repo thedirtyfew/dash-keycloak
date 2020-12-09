@@ -63,23 +63,42 @@ class AuthHandler:
 
 
 class AuthMiddleWare:
-    def __init__(self, app, auth_handler, redirect_uri, uri_whitelist=None,
+    def __init__(self, app, auth_handler, redirect_uri=None, uri_whitelist=None,
                  prefix_callback_path=None, abort_on_unauthorized=None):
         self.app = app
         self.auth_handler = auth_handler
-        self.redirect_uri = redirect_uri
+        self._redirect_uri = redirect_uri
         self.uri_whitelist = uri_whitelist
+        self.prefix_callback_path = prefix_callback_path
         # Setup uris.
-        parse_result = urllib.parse.urlparse(redirect_uri)
+
         self.callback_path = "/keycloak/callback"
-        # Optionally, prefix callback path with current path.
+
+        self.abort_on_unauthorized = abort_on_unauthorized
+
+    def get_auth_uri(self):
+        return self.auth_handler.auth_url(self.get_callback_uri())
+
+    def get_callback_uri(self):
+        parse_result = urllib.parse.urlparse(self.get_redirect_uri())
         callback_path = self.callback_path
-        if prefix_callback_path:
+
+        # Optionally, prefix callback path with current path.
+        if self.prefix_callback_path:
             callback_path = parse_result.path + callback_path
         # Bind the uris.
-        self.callback_uri = parse_result._replace(path=callback_path).geturl()
-        self.auth_uri = self.auth_handler.auth_url(self.callback_uri)
-        self.abort_on_unauthorized = abort_on_unauthorized
+        return parse_result._replace(path=callback_path).geturl()
+
+    def get_redirect_uri(self):
+        if self._redirect_uri:
+            return self._redirect_uri
+        elif "HTTP_X_FORWARDED_PROTO" in request.environ:
+            scheme = request.environ["HTTP_X_FORWARDED_PROTO"]
+            host = request.environ["HTTP_HOST"]
+            port = request.environ["HTTP_X_FORWARDED_PORT"]
+            return f"{scheme}://{host}:{port}"
+        else:
+            return request.host_url
 
     def __call__(self, environ, start_response):
         response = None
@@ -91,14 +110,14 @@ class AuthMiddleWare:
         if request.path == self.callback_path:
             kwargs = dict(grant_type=["authorization_code"],
                           code=request.args.get("code", "unknown"),
-                          redirect_uri=self.callback_uri)
-            response = self.auth_handler.login(request, redirect(self.redirect_uri), **kwargs)
+                          redirect_uri=self.get_callback_uri())
+            response = self.auth_handler.login(request, redirect(self.get_redirect_uri()), **kwargs)
         # If unauthorized, redirect to login page.
         if self.callback_path not in request.path and not self.auth_handler.is_logged_in(request):
             if check_match_in_list(self.abort_on_unauthorized, request.path):
                 response = Response("Unauthorized", 401)
             else:
-                response = redirect(self.auth_uri)
+                response = redirect(self.get_auth_uri())
         # Save the session.
         if response:
             return response(environ, start_response)
@@ -107,7 +126,7 @@ class AuthMiddleWare:
 
 
 class FlaskKeycloak:
-    def __init__(self, app, keycloak_openid, redirect_uri, uri_whitelist=None, logout_path=None, heartbeat_path=None,
+    def __init__(self, app, keycloak_openid, redirect_uri=None, uri_whitelist=None, logout_path=None, heartbeat_path=None,
                  login_path=None, prefix_callback_path=None, abort_on_unauthorized=None):
         logout_path = '/logout' if logout_path is None else logout_path
         uri_whitelist = [] if uri_whitelist is None else uri_whitelist
@@ -126,20 +145,20 @@ class FlaskKeycloak:
         if logout_path:
             @app.route(logout_path, methods=['POST'])
             def route_logout():
-                return auth_handler.logout(redirect(redirect_uri))
+                return auth_handler.logout(redirect(app.wsgi_app.get_redirect_uri()))
         if login_path:
             @app.route(login_path, methods=['POST'])
             def route_login():
                 if request.json is None or ("username" not in request.json or "password" not in request.json):
                     return "No username and/or password was specified as json", 400
-                return auth_handler.login(request, redirect(redirect_uri), **request.json)
+                return auth_handler.login(request, redirect(app.wsgi_app.get_redirect_uri()), **request.json)
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
             def route_heartbeat_path():
                 return "Chuck Norris can kill two stones with one bird."
 
     @staticmethod
-    def from_kc_oidc_json(app, redirect_uri, config_path=None, logout_path=None, heartbeat_path=None,
+    def from_kc_oidc_json(app, redirect_uri=None, config_path=None, logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
                           prefix_callback_path=None, abort_on_unauthorized=None):
         # Read config, assumed to be in Keycloak OIDC JSON format.
@@ -162,10 +181,10 @@ class FlaskKeycloak:
                              prefix_callback_path=prefix_callback_path, abort_on_unauthorized=abort_on_unauthorized)
 
     @staticmethod
-    def try_from_kc_oidc_json(app, redirect_uri, **kwargs):
+    def try_from_kc_oidc_json(app, **kwargs):
         success = True
         try:
-            FlaskKeycloak.from_kc_oidc_json(app, redirect_uri, **kwargs)
+            FlaskKeycloak.from_kc_oidc_json(app, **kwargs)
         except FileNotFoundError:
             app.logger.exception("No keycloak configuration found, proceeding without authentication.")
             success = False
