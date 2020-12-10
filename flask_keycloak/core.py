@@ -167,21 +167,29 @@ class FlaskKeycloak:
     def from_kc_oidc_json(app, redirect_uri=None, config_path=None, logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
                           prefix_callback_path=None, abort_on_unauthorized=None, debug_user=None, debug_roles=None):
-        # Read config, assumed to be in Keycloak OIDC JSON format.
-        config_path = "keycloak.json" if config_path is None else config_path
-        with open(config_path, 'r') as f:
-            config_data = json.load(f)
-        # Setup the Keycloak connection.
-        keycloak_config = dict(server_url=config_data["auth-server-url"],
-                               realm_name=config_data["realm"],
-                               client_id=config_data["resource"],
-                               client_secret_key=config_data["credentials"]["secret"],
-                               verify=config_data["ssl-required"] != "none")
-        if keycloak_kwargs is not None:
-            keycloak_config = {**keycloak_config, **keycloak_kwargs}
-        keycloak_openid = KeycloakOpenID(**keycloak_config)
-        if authorization_settings is not None:
-            keycloak_openid.load_authorization_config(authorization_settings)
+        try:
+            # Read config, assumed to be in Keycloak OIDC JSON format.
+            config_path = "keycloak.json" if config_path is None else config_path
+            with open(config_path, 'r') as f:
+                config_data = json.load(f)
+            # Setup the Keycloak connection.
+            keycloak_config = dict(server_url=config_data["auth-server-url"],
+                                   realm_name=config_data["realm"],
+                                   client_id=config_data["resource"],
+                                   client_secret_key=config_data["credentials"]["secret"],
+                                   verify=config_data["ssl-required"] != "none")
+            if keycloak_kwargs is not None:
+                keycloak_config = {**keycloak_config, **keycloak_kwargs}
+            keycloak_openid = KeycloakOpenID(**keycloak_config)
+            if authorization_settings is not None:
+                keycloak_openid.load_authorization_config(authorization_settings)
+        except FileNotFoundError as ex:
+            before_login = _setup_debug_session(debug_user, debug_roles)
+            # If there is not debug user and no keycloak, raise the exception.
+            if before_login is None:
+                raise ex
+            # Create dummy object, we are bypassing keycloak anyway.
+            keycloak_openid = KeycloakOpenID("url", "name", "client_id", "client_secret_key")
         return FlaskKeycloak(app, keycloak_openid, redirect_uri, logout_path=logout_path,
                              heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path,
                              prefix_callback_path=prefix_callback_path, abort_on_unauthorized=abort_on_unauthorized,
