@@ -12,7 +12,7 @@ from flask_keycloak import FlaskKeycloak
 config_path = None if len(sys.argv) < 2 else sys.argv[1]
 # Setup server.
 server = Flask(__name__)
-FlaskKeycloak.from_kc_oidc_json(server, "http://localhost:5000/", config_path=config_path)
+FlaskKeycloak.from_kc_oidc_json(server, config_path=config_path)
 # Setup dash app.
 app = dash.Dash(__name__, server=server)
 app.layout = html.Div(id="main", children=[html.Div(id="greeting"), dcc.LogoutButton(logout_url='/logout')])

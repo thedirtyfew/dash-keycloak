@@ -76,11 +76,11 @@ class AuthMiddleWare:
 
         self.abort_on_unauthorized = abort_on_unauthorized
 
-    def get_auth_uri(self):
-        return self.auth_handler.auth_url(self.get_callback_uri())
+    def get_auth_uri(self, environ):
+        return self.auth_handler.auth_url(self.get_callback_uri(environ))
 
-    def get_callback_uri(self):
-        parse_result = urllib.parse.urlparse(self.get_redirect_uri())
+    def get_callback_uri(self, environ):
+        parse_result = urllib.parse.urlparse(self.get_redirect_uri(environ))
         callback_path = self.callback_path
 
         # Optionally, prefix callback path with current path.
@@ -89,16 +89,14 @@ class AuthMiddleWare:
         # Bind the uris.
         return parse_result._replace(path=callback_path).geturl()
 
-    def get_redirect_uri(self):
+    def get_redirect_uri(self, environ):
         if self._redirect_uri:
             return self._redirect_uri
-        elif "HTTP_X_FORWARDED_PROTO" in request.environ:
-            scheme = request.environ["HTTP_X_FORWARDED_PROTO"]
-            host = request.environ["HTTP_HOST"]
-            port = request.environ["HTTP_X_FORWARDED_PORT"]
-            return f"{scheme}://{host}:{port}"
         else:
-            return request.host_url
+            scheme = environ.get("HTTP_X_FORWARDED_PROTO", environ.get("wsgi.url_scheme", "http"))
+            host = environ.get("HTTP_X_FORWARDED_SERVER", environ.get("SERVER_NAME"))
+            port = environ.get("HTTP_X_FORWARDED_PORT", environ.get("SERVER_PORT"))
+            return f"{scheme}://{host}:{port}"
 
     def __call__(self, environ, start_response):
         response = None
@@ -110,14 +108,14 @@ class AuthMiddleWare:
         if request.path == self.callback_path:
             kwargs = dict(grant_type=["authorization_code"],
                           code=request.args.get("code", "unknown"),
-                          redirect_uri=self.get_callback_uri())
-            response = self.auth_handler.login(request, redirect(self.get_redirect_uri()), **kwargs)
+                          redirect_uri=self.get_callback_uri(environ))
+            response = self.auth_handler.login(request, redirect(self.get_redirect_uri(environ)), **kwargs)
         # If unauthorized, redirect to login page.
         if self.callback_path not in request.path and not self.auth_handler.is_logged_in(request):
             if check_match_in_list(self.abort_on_unauthorized, request.path):
                 response = Response("Unauthorized", 401)
             else:
-                response = redirect(self.get_auth_uri())
+                response = redirect(self.get_auth_uri(environ))
         # Save the session.
         if response:
             return response(environ, start_response)
@@ -145,13 +143,13 @@ class FlaskKeycloak:
         if logout_path:
             @app.route(logout_path, methods=['POST'])
             def route_logout():
-                return auth_handler.logout(redirect(app.wsgi_app.get_redirect_uri()))
+                return auth_handler.logout(redirect(app.wsgi_app.get_redirect_uri(request.environ)))
         if login_path:
             @app.route(login_path, methods=['POST'])
             def route_login():
                 if request.json is None or ("username" not in request.json or "password" not in request.json):
                     return "No username and/or password was specified as json", 400
-                return auth_handler.login(request, redirect(app.wsgi_app.get_redirect_uri()), **request.json)
+                return auth_handler.login(request, redirect(app.wsgi_app.get_redirect_uri(request.environ)), **request.json)
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
             def route_heartbeat_path():
