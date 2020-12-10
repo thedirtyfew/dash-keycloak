@@ -12,7 +12,7 @@ class Objectify(object):
     def __init__(self, **kwargs):
         self.__dict__.update({key.lower(): kwargs[key] for key in kwargs})
 
-        
+
 def check_match_in_list(patterns, to_check):
     if patterns is None or to_check is None:
         return False
@@ -38,22 +38,24 @@ class AuthHandler:
         return self.keycloak_openid.auth_url(callback_uri)
 
     def login(self, request, response, **kwargs):
-        session = self.session_interface.open_session(self.config_object, request)
-        # Get access token from Keycloak.
         try:
+            # Get access token from Keycloak.
             token = self.keycloak_openid.token(**kwargs)
             # Get extra info.
             user = self.keycloak_openid.userinfo(token['access_token'])
             introspect = self.keycloak_openid.introspect(token['access_token'])
-            # Bind token, userinfo, and token introspection to the session.
-            session["token"] = token
-            session["userinfo"] = user
-            session["introspect"] = introspect
-            # Save the session.
-            self.session_interface.save_session(self.config_object, session, response)
+            # Bind info to the session.
+            response = self.set_session(request, response, token=token, userinfo=user, introspect=introspect)
         except KeycloakAuthenticationError as e:
             return e.error_message, e.response_code
 
+        return response
+
+    def set_session(self, request, response, **kwargs):
+        session = self.session_interface.open_session(self.config_object, request)
+        for kw in kwargs:
+            session[kw] = kwargs[kw]
+        self.session_interface.save_session(self.config_object, session, response)
         return response
 
     def logout(self, response=None):
@@ -64,16 +66,15 @@ class AuthHandler:
 
 class AuthMiddleWare:
     def __init__(self, app, auth_handler, redirect_uri=None, uri_whitelist=None,
-                 prefix_callback_path=None, abort_on_unauthorized=None):
+                 prefix_callback_path=None, abort_on_unauthorized=None, before_login=None):
         self.app = app
         self.auth_handler = auth_handler
         self._redirect_uri = redirect_uri
         self.uri_whitelist = uri_whitelist
         self.prefix_callback_path = prefix_callback_path
+        self.before_login = before_login
         # Setup uris.
-
         self.callback_path = "/keycloak/callback"
-
         self.abort_on_unauthorized = abort_on_unauthorized
 
     def get_auth_uri(self, environ):
@@ -82,7 +83,6 @@ class AuthMiddleWare:
     def get_callback_uri(self, environ):
         parse_result = urllib.parse.urlparse(self.get_redirect_uri(environ))
         callback_path = self.callback_path
-
         # Optionally, prefix callback path with current path.
         if self.prefix_callback_path:
             callback_path = parse_result.path + callback_path
@@ -104,6 +104,13 @@ class AuthMiddleWare:
         # If the uri has been whitelisted, just proceed.
         if check_match_in_list(self.uri_whitelist, request.path):
             return self.app(environ, start_response)
+        # If we are logged in, just proceed.
+        if self.auth_handler.is_logged_in(request):
+            return self.app(environ, start_response)
+        # Before login hook.
+        if self.before_login:
+            response = self.before_login(request, redirect(self.get_redirect_uri(environ)), self.auth_handler)
+            return response(environ, start_response)
         # On callback, request access token.
         if request.path == self.callback_path:
             kwargs = dict(grant_type=["authorization_code"],
@@ -111,7 +118,7 @@ class AuthMiddleWare:
                           redirect_uri=self.get_callback_uri(environ))
             response = self.auth_handler.login(request, redirect(self.get_redirect_uri(environ)), **kwargs)
         # If unauthorized, redirect to login page.
-        if self.callback_path not in request.path and not self.auth_handler.is_logged_in(request):
+        if self.callback_path not in request.path:
             if check_match_in_list(self.abort_on_unauthorized, request.path):
                 response = Response("Unauthorized", 401)
             else:
@@ -124,8 +131,9 @@ class AuthMiddleWare:
 
 
 class FlaskKeycloak:
-    def __init__(self, app, keycloak_openid, redirect_uri=None, uri_whitelist=None, logout_path=None, heartbeat_path=None,
-                 login_path=None, prefix_callback_path=None, abort_on_unauthorized=None):
+    def __init__(self, app, keycloak_openid, redirect_uri=None, uri_whitelist=None, logout_path=None,
+                 heartbeat_path=None,
+                 login_path=None, prefix_callback_path=None, abort_on_unauthorized=None, before_login=None):
         logout_path = '/logout' if logout_path is None else logout_path
         uri_whitelist = [] if uri_whitelist is None else uri_whitelist
         if heartbeat_path is not None:
@@ -138,7 +146,7 @@ class FlaskKeycloak:
         # Add middleware.
         auth_handler = AuthHandler(app.wsgi_app, app.config, app.session_interface, keycloak_openid)
         app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist,
-                                      prefix_callback_path, abort_on_unauthorized)
+                                      prefix_callback_path, abort_on_unauthorized, before_login)
         # Add logout mechanism.
         if logout_path:
             @app.route(logout_path, methods=['POST'])
@@ -149,7 +157,8 @@ class FlaskKeycloak:
             def route_login():
                 if request.json is None or ("username" not in request.json or "password" not in request.json):
                     return "No username and/or password was specified as json", 400
-                return auth_handler.login(request, redirect(app.wsgi_app.get_redirect_uri(request.environ)), **request.json)
+                return auth_handler.login(request, redirect(app.wsgi_app.get_redirect_uri(request.environ)),
+                                          **request.json)
         if heartbeat_path:
             @app.route(heartbeat_path, methods=['GET'])
             def route_heartbeat_path():
@@ -158,7 +167,7 @@ class FlaskKeycloak:
     @staticmethod
     def from_kc_oidc_json(app, redirect_uri=None, config_path=None, logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
-                          prefix_callback_path=None, abort_on_unauthorized=None):
+                          prefix_callback_path=None, abort_on_unauthorized=None, debug_user=None, debug_roles=None):
         # Read config, assumed to be in Keycloak OIDC JSON format.
         config_path = "keycloak.json" if config_path is None else config_path
         with open(config_path, 'r') as f:
@@ -176,7 +185,8 @@ class FlaskKeycloak:
             keycloak_openid.load_authorization_config(authorization_settings)
         return FlaskKeycloak(app, keycloak_openid, redirect_uri, logout_path=logout_path,
                              heartbeat_path=heartbeat_path, uri_whitelist=uri_whitelist, login_path=login_path,
-                             prefix_callback_path=prefix_callback_path, abort_on_unauthorized=abort_on_unauthorized)
+                             prefix_callback_path=prefix_callback_path, abort_on_unauthorized=abort_on_unauthorized,
+                             before_login=_setup_debug_session(debug_user, debug_roles))
 
     @staticmethod
     def try_from_kc_oidc_json(app, **kwargs):
@@ -196,3 +206,13 @@ class FlaskKeycloak:
             app.logger.exception("Encountered keycloak get error, proceeding without authentication.")
             success = False
         return success
+
+
+def _setup_debug_session(debug_user, debug_roles, debug_token="DEBUG_TOKEN"):
+    def _before_login(request, response, auth_handler):
+        return auth_handler.set_session(request, response,
+                                        token=debug_token,
+                                        userinfo=dict(preferred_username=debug_user),
+                                        introspect=dict(realm_access=dict(roles=debug_roles)))
+
+    return _before_login if debug_user is not None else None
