@@ -94,9 +94,8 @@ class AuthMiddleWare:
             return self._redirect_uri
         else:
             scheme = environ.get("HTTP_X_FORWARDED_PROTO", environ.get("wsgi.url_scheme", "http"))
-            host = environ.get("HTTP_X_FORWARDED_SERVER", environ.get("SERVER_NAME"))
-            port = environ.get("HTTP_X_FORWARDED_PORT", environ.get("SERVER_PORT"))
-            return f"{scheme}://{host}:{port}"
+            host = environ.get("HTTP_X_FORWARDED_SERVER", environ.get("HTTP_HOST"))
+            return f"{scheme}://{host}"
 
     def __call__(self, environ, start_response):
         response = None
