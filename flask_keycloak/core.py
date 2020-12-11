@@ -2,7 +2,7 @@ import json
 import logging
 import urllib.parse
 import re
-from flask import redirect, session, request, Response
+from flask import redirect, session, request, Response, g
 from keycloak import KeycloakOpenID, KeycloakGetError
 from keycloak.exceptions import KeycloakConnectionError, KeycloakAuthenticationError
 from werkzeug.wrappers import Request
@@ -144,8 +144,15 @@ class FlaskKeycloak:
             app.config['SECRET_KEY'] = keycloak_openid._client_secret_key
         # Add middleware.
         auth_handler = AuthHandler(app.wsgi_app, app.config, app.session_interface, keycloak_openid)
-        app.wsgi_app = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist,
+        auth_middleware = AuthMiddleWare(app.wsgi_app, auth_handler, redirect_uri, uri_whitelist,
                                       prefix_callback_path, abort_on_unauthorized, before_login)
+
+        def _save_external_url():
+            g.external_url = auth_middleware.get_redirect_uri(request.environ)
+
+        app.before_request(_save_external_url)
+        app.wsgi_app = auth_middleware
+
         # Add logout mechanism.
         if logout_path:
             @app.route(logout_path, methods=['POST'])

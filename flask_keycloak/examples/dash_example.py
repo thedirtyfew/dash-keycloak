@@ -5,7 +5,7 @@ import dash_core_components as dcc
 import dash_html_components as html
 
 from dash.dependencies import Input, Output
-from flask import Flask, session
+from flask import Flask, session, g
 from flask_keycloak import FlaskKeycloak
 
 # Read config path from cmd if provided.
@@ -23,9 +23,9 @@ app.layout = html.Div(id="main", children=[html.Div(id="greeting"), dcc.LogoutBu
     [Input('main', 'children')])
 def update_greeting(input_value):
     user = session["userinfo"]
-    return "Hello {}".format(user['preferred_username'])
+    return "Hello {} - calling from {}".format(user['preferred_username'], g.external_url)
 
 
 if __name__ == '__main__':
-    app.run_server(port=5000)
+    app.run_server(port=5006)
 
