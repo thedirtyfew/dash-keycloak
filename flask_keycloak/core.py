@@ -71,10 +71,10 @@ class AuthMiddleWare:
         self.auth_handler = auth_handler
         self._redirect_uri = redirect_uri
         self.uri_whitelist = uri_whitelist
-        self.prefix_callback_path = prefix_callback_path
-        self.before_login = before_login
         # Setup uris.
-        self.callback_path = "/keycloak/callback"
+        self.before_login = before_login
+        # Optionally, prefix callback path with current path.
+        self.callback_path = prefix_callback_path + "/keycloak/callback"
         self.abort_on_unauthorized = abort_on_unauthorized
 
     def get_auth_uri(self, environ):
@@ -83,9 +83,6 @@ class AuthMiddleWare:
     def get_callback_uri(self, environ):
         parse_result = urllib.parse.urlparse(self.get_redirect_uri(environ))
         callback_path = self.callback_path
-        # Optionally, prefix callback path with current path.
-        if self.prefix_callback_path:
-            callback_path = parse_result.path + callback_path
         # Bind the uris.
         return parse_result._replace(path=callback_path).geturl()
 
