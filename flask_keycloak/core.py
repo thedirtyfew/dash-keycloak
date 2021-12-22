@@ -174,7 +174,7 @@ class FlaskKeycloak:
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
                           prefix_callback_path=None, abort_on_unauthorized=None, debug_user=None, debug_roles=None):
         try:
-            # The oicd json is eather read from a file with 'config_path' or is directly passed as 'config_data'
+            # The oicd json is either read from a file with 'config_path' or is directly passed as 'config_data'
             if not config_data:
                 # Read config, assumed to be in Keycloak OIDC JSON format.
                 config_path = "keycloak.json" if config_path is None else config_path
