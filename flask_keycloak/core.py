@@ -169,25 +169,27 @@ class FlaskKeycloak:
                 return "Chuck Norris can kill two stones with one bird."
 
     @staticmethod
-    def from_kc_oidc_json(app, redirect_uri=None, config_path=None, keycloak_config: Union[str, dict] = None,
+    def from_kc_oidc_json(app, redirect_uri=None, config_path=None, config_data: Union[str, dict] = None,
                           logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
                           prefix_callback_path=None, abort_on_unauthorized=None, debug_user=None, debug_roles=None):
         try:
-            if not keycloak_config:
+            # The oicd json is eather read from a file with 'config_path' or is directly passed as 'config_data'
+            if not config_data:
                 # Read config, assumed to be in Keycloak OIDC JSON format.
                 config_path = "keycloak.json" if config_path is None else config_path
                 with open(config_path, 'r') as f:
                     config_data = json.load(f)
-                # Setup the Keycloak connection.
-                keycloak_config = dict(server_url=config_data["auth-server-url"],
-                                       realm_name=config_data["realm"],
-                                       client_id=config_data["resource"],
-                                       client_secret_key=config_data["credentials"]["secret"],
-                                       verify=config_data["ssl-required"] != "none")
             else:
-                if isinstance(keycloak_config, str):
-                    keycloak_config = json.load(keycloak_config)
+                if isinstance(config_data, str):
+                    config_data = json.load(config_data)
+
+            # Setup the Keycloak connection.
+            keycloak_config = dict(server_url=config_data["auth-server-url"],
+                                   realm_name=config_data["realm"],
+                                   client_id=config_data["resource"],
+                                   client_secret_key=config_data["credentials"]["secret"],
+                                   verify=config_data["ssl-required"] != "none")
             if keycloak_kwargs is not None:
                 keycloak_config = {**keycloak_config, **keycloak_kwargs}
             keycloak_openid = KeycloakOpenID(**keycloak_config)
