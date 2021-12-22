@@ -6,6 +6,7 @@ from flask import redirect, session, request, Response, g
 from keycloak import KeycloakOpenID, KeycloakGetError
 from keycloak.exceptions import KeycloakConnectionError, KeycloakAuthenticationError
 from werkzeug.wrappers import Request
+from typing import Union
 
 
 class Objectify(object):
@@ -168,20 +169,25 @@ class FlaskKeycloak:
                 return "Chuck Norris can kill two stones with one bird."
 
     @staticmethod
-    def from_kc_oidc_json(app, redirect_uri=None, config_path=None, logout_path=None, heartbeat_path=None,
+    def from_kc_oidc_json(app, redirect_uri=None, config_path=None, keycloak_config: Union[str, dict] = None,
+                          logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
                           prefix_callback_path=None, abort_on_unauthorized=None, debug_user=None, debug_roles=None):
         try:
-            # Read config, assumed to be in Keycloak OIDC JSON format.
-            config_path = "keycloak.json" if config_path is None else config_path
-            with open(config_path, 'r') as f:
-                config_data = json.load(f)
-            # Setup the Keycloak connection.
-            keycloak_config = dict(server_url=config_data["auth-server-url"],
-                                   realm_name=config_data["realm"],
-                                   client_id=config_data["resource"],
-                                   client_secret_key=config_data["credentials"]["secret"],
-                                   verify=config_data["ssl-required"] != "none")
+            if not keycloak_config:
+                # Read config, assumed to be in Keycloak OIDC JSON format.
+                config_path = "keycloak.json" if config_path is None else config_path
+                with open(config_path, 'r') as f:
+                    config_data = json.load(f)
+                # Setup the Keycloak connection.
+                keycloak_config = dict(server_url=config_data["auth-server-url"],
+                                       realm_name=config_data["realm"],
+                                       client_id=config_data["resource"],
+                                       client_secret_key=config_data["credentials"]["secret"],
+                                       verify=config_data["ssl-required"] != "none")
+            else:
+                if isinstance(keycloak_config, str):
+                    keycloak_config = json.load(keycloak_config)
             if keycloak_kwargs is not None:
                 keycloak_config = {**keycloak_config, **keycloak_kwargs}
             keycloak_openid = KeycloakOpenID(**keycloak_config)
