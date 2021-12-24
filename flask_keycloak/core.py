@@ -170,7 +170,7 @@ class FlaskKeycloak:
     @staticmethod
     def from_kc_oidc_json(app, redirect_uri=None, config_path=None, logout_path=None, heartbeat_path=None,
                           keycloak_kwargs=None, authorization_settings=None, uri_whitelist=None, login_path=None,
-                          prefix_callback_path=None, abort_on_unauthorized=None, debug_user=None, debug_roles=None):
+                          prefix_callback_path='', abort_on_unauthorized=None, debug_user=None, debug_roles=None):
         try:
             # Read config, assumed to be in Keycloak OIDC JSON format.
             config_path = "keycloak.json" if config_path is None else config_path
