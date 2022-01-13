@@ -182,7 +182,7 @@ class FlaskKeycloak:
                     config_data = json.load(f)
             else:
                 if isinstance(config_data, str):
-                    config_data = json.load(config_data)
+                    config_data = json.loads(config_data)
 
             # Setup the Keycloak connection.
             keycloak_config = dict(server_url=config_data["auth-server-url"],
